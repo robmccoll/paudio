@@ -7,6 +7,8 @@
 
 #define SAMPLE_RATE 44100
 #define SAMPLE_TIME (1.0f/(SAMPLE_RATE))
+
+typedef  double (*updater_t)(void *, double);
  
 typedef struct {
   double freqHz;
@@ -14,15 +16,16 @@ typedef struct {
 } siner_t;
 
 double
-siner_update(siner_t * s, double time) {
+siner_update(void * v, double time) {
+  siner_t * s = (siner_t *)v;
   return sin(time * s->freqHz * 2 * M_PI + s->phase);
 }
 
 typedef struct {
   int64_t sample;
   int64_t count;
-  double (** updaters)(void *, double);
-  void ** data;
+  updater_t *updaters;
+  void **data;
 } status_t;
  
 int sines(const void *ibuf, void *obuf, unsigned long framesperbuf,
@@ -34,11 +37,12 @@ int sines(const void *ibuf, void *obuf, unsigned long framesperbuf,
 
   for(unsigned long i = 0; i < framesperbuf; i++) {
       double time = ((data->sample + i) * SAMPLE_TIME);
+      double val = 0;
       for(int64_t u = 0; u < data->count; u++) {
-        float val = siner_update(&data->sine,  time);
+        val += data->updaters[u](data->data[u], time);
       }
-      *out++ = val;
-      *out++ = val;
+      *out++ = val / data->count;
+      *out++ = val / data->count;
   }
 
   data->sample += framesperbuf;
@@ -54,10 +58,14 @@ main(int argc, char *argv[])
     return -1;
   }
 
-  status_t data = {0, {880, 0}};
+  siner_t sine1 = {880, 0};
+  siner_t sine2 = {440, 0};
+  updater_t * updaters = (updater_t[]){siner_update, siner_update};
+  void ** data = (void *[]){&sine1, &sine2};
+  status_t status = {0, 2, updaters, data};
 
   PaStream *stream = NULL;
-  if(paNoError != (err = Pa_OpenDefaultStream(&stream, 0, 2, paFloat32, SAMPLE_RATE, 256, sines, &data))) {
+  if(paNoError != (err = Pa_OpenDefaultStream(&stream, 0, 2, paFloat32, SAMPLE_RATE, 256, sines, &status))) {
     printf("PA Stream open failed: %s\n", Pa_GetErrorText(err));
     return -1;
   }
