@@ -8,17 +8,20 @@
 #define SAMPLE_RATE 44100
 #define SAMPLE_TIME (1.0f/(SAMPLE_RATE))
 
-typedef  double (*updater_t)(void *, double);
+typedef struct {double l; double r; } steriodbl;
+typedef  steriodbl (*updater_t)(void *, double);
  
 typedef struct {
   double freqHz;
   double phase;
+  double panning;
 } siner_t;
 
-double
+steriodbl
 siner_update(void * v, double time) {
   siner_t * s = (siner_t *)v;
-  return sin(time * s->freqHz * 2 * M_PI + s->phase);
+  double val = sin(time * s->freqHz * 2 * M_PI + s->phase);
+  return (steriodbl){s->panning * val, (1.0 - s->panning) * val};
 }
 
 typedef struct {
@@ -37,12 +40,14 @@ int sines(const void *ibuf, void *obuf, unsigned long framesperbuf,
 
   for(unsigned long i = 0; i < framesperbuf; i++) {
       double time = ((data->sample + i) * SAMPLE_TIME);
-      double val = 0;
+      steriodbl val = {0, 0};
       for(int64_t u = 0; u < data->count; u++) {
-        val += data->updaters[u](data->data[u], time);
+        steriodbl cur = data->updaters[u](data->data[u], time);
+        val.l += cur.l;
+        val.r += cur.r;
       }
-      *out++ = val / data->count;
-      *out++ = val / data->count;
+      *out++ = val.l / data->count;
+      *out++ = val.r / data->count;
   }
 
   data->sample += framesperbuf;
@@ -58,8 +63,8 @@ main(int argc, char *argv[])
     return -1;
   }
 
-  siner_t sine1 = {880, 0};
-  siner_t sine2 = {440, 0};
+  siner_t sine1 = {660, 0, 0};
+  siner_t sine2 = {440, 0, 1};
   updater_t * updaters = (updater_t[]){siner_update, siner_update};
   void ** data = (void *[]){&sine1, &sine2};
   status_t status = {0, 2, updaters, data};
